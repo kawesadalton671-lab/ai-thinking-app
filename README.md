@@ -1,40 +1,46 @@
-# AI Thinking App
+# Production deployment
 
-MindForge is a full-stack AI thinking workspace for structured brainstorming, decisions, planning, analysis, and collaborative reasoning.
+## Required environment variables
 
-## Included upgrades
-- **A — Authentication:** account registration, sign-in, password hashing, bearer sessions, and sign-out.
-- **B — Persistence:** server-side JSON database in `data/mindforge.json`, ready to replace with Postgres/Supabase without changing the client API.
-- **C — Collaboration:** projects, members, invitations by registered email, roles, and shared team workspaces.
-- **D — AI chat threads:** persistent project conversations with user messages and AI follow-up responses.
-- AI thinking modes, profiles, saved sessions, project metrics, and Markdown export.
+- `NODE_ENV=production`
+- `AUTH_SECRET`: at least 32 random characters; never commit it
+- `APP_ORIGIN`: the exact public HTTPS origin
+- `PORT`: public process port, usually supplied by the host
+- `DATA_DIR`: persistent mounted directory for the development storage adapter
 
-## Local development
-
-```bash
-npm install
-npm run dev
-```
-
-The Vite client runs on port 3000 and the Express API runs on port 4000. Data is persisted locally in `data/mindforge.json` and is ignored by Git.
-
-## Environment
-
-Optional `.env`:
+## Build and run
 
 ```bash
-PORT=4000
-DATA_DIR=./data
-OPENAI_API_KEY=your_api_key_here
-```
-
-The current API includes a deterministic fallback generator, so the application works without an AI key. The `/api/generate` contract is intentionally isolated so an OpenAI, Anthropic, or Supabase Edge Function provider can be connected later.
-
-## Production build
-
-```bash
+npm ci
 npm run build
 npm start
 ```
 
-For production, replace the JSON persistence adapter with Postgres/Supabase, use a shared session store, and configure HTTPS, rate limiting, email invitations, and a secret-backed token store.
+The production server serves the compiled Vite app and the API from the same origin. Put it behind HTTPS using a managed platform or reverse proxy.
+
+## Security hardening included
+
+- Helmet security headers
+- Same-origin-friendly CORS with credentials
+- HttpOnly, Secure, SameSite authentication cookie in production
+- Signed, expiring authentication tokens
+- Password hashing with Node `scrypt`
+- Global and authentication-specific rate limiting
+- Request body size limits and bounded user input
+- Generic authentication errors and graceful shutdown
+- Health endpoint at `/api/health`
+
+## Important persistence note
+
+The included JSON adapter is suitable for a single-instance deployment with a persistent disk. For multiple instances or high traffic, replace it with Postgres/Supabase and a shared session store before launch. Do not deploy with ephemeral filesystem storage.
+
+## Launch checklist
+
+- [ ] Configure HTTPS and a custom domain
+- [ ] Set a unique `AUTH_SECRET` in the host secret manager
+- [ ] Set `APP_ORIGIN` to the exact HTTPS URL
+- [ ] Attach persistent storage or migrate the adapter to Postgres/Supabase
+- [ ] Configure backups and monitoring for the data store
+- [ ] Add an AI provider key only through host secrets
+- [ ] Verify `/api/health`, registration, login, logout, project access, and invitation flows
+- [ ] Review privacy policy, terms, data retention, and account deletion requirements
