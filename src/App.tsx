@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 type Mode = 'brainstorm' | 'decision' | 'plan' | 'analysis';
+type Profile = 'balanced' | 'ambitious' | 'cautious';
 
 type ThoughtCard = {
   label: string;
@@ -12,46 +13,60 @@ type Session = {
   id: number;
   title: string;
   mode: Mode;
+  profile: Profile;
+  prompt: string;
   summary: string;
   cards: ThoughtCard[];
   createdAt: string;
 };
 
-const modeLabels: Record<Mode, string> = {
-  brainstorm: 'Brainstorm',
-  decision: 'Decision',
-  plan: 'Plan',
-  analysis: 'Analysis'
+const MODE_META: Record<Mode, { label: string; accent: string }> = {
+  brainstorm: { label: 'Brainstorm', accent: '#9c7bff' },
+  decision: { label: 'Decision', accent: '#5bc0ff' },
+  plan: { label: 'Plan', accent: '#4fd1a5' },
+  analysis: { label: 'Analysis', accent: '#f4b860' }
 };
 
-const storageKey = 'mindforge-sessions';
+const PROFILE_META: Record<Profile, string> = {
+  balanced: 'Balanced',
+  ambitious: 'Ambitious',
+  cautious: 'Cautious'
+};
 
-function buildCards(topic: string, mode: Mode): ThoughtCard[] {
-  const cleanTopic = topic.trim() || 'a new opportunity';
-  const words = cleanTopic.split(/\s+/).filter(Boolean);
-  const primary = words.slice(0, 3).join(' ') || 'the challenge';
+const STORAGE_KEY = 'mindforge-sessions-v2';
+
+function titleFromPrompt(prompt: string) {
+  const trimmed = prompt.trim();
+  if (!trimmed) return 'Untitled thought';
+  return trimmed.slice(0, 48).trim();
+}
+
+function buildLocalCards(prompt: string, mode: Mode): ThoughtCard[] {
+  const cleanPrompt = prompt.trim() || 'a new opportunity';
+  const words = cleanPrompt.split(/\s+/).filter(Boolean);
+  const lead = words.slice(0, 3).join(' ') || 'the challenge';
 
   if (mode === 'brainstorm') {
     return [
       {
-        label: 'Core direction',
-        title: 'Big idea',
-        content: `Position ${cleanTopic} as a high-value opportunity by focusing on user impact, speed to value, and a clear differentiation from current alternatives.`
+        label: 'Core idea',
+        title: 'Opportunity framing',
+        content: `Frame ${cleanPrompt} as a meaningful user problem and highlight the value it creates for people who feel the pain most strongly.`
       },
       {
-        label: 'Creative angles',
-        title: 'Novel ideas',
-        content: `Explore edge cases around ${primary}, define a few bold experiments, and test ideas that feel surprising but align with the user need.`
+        label: 'Creative direction',
+        title: 'Divergent options',
+        content: `Generate a few unexpected angles around ${lead}, then test which ones create the strongest emotional pull without increasing complexity too much.`
       },
       {
-        label: 'Watch-outs',
-        title: 'Hidden friction',
-        content: `Look for bottlenecks in adoption, unclear incentives, and complexity that could slow trust or make the experience feel heavy.`
+        label: 'Risk signal',
+        title: 'Frictions to watch',
+        content: `Check for trust issues, adoption friction, unclear incentives, and hidden dependencies that could slow momentum before launch.`
       },
       {
-        label: 'Next move',
-        title: 'Actionable next step',
-        content: `Create a fast prototype and collect feedback from a small group of target users before investing heavily in a final direction.`
+        label: 'Action path',
+        title: 'Fastest next move',
+        content: `Run a concept test with a narrow audience, gather feedback, and use the response to sharpen the strongest idea before expanding scope.`
       }
     ];
   }
@@ -59,24 +74,24 @@ function buildCards(topic: string, mode: Mode): ThoughtCard[] {
   if (mode === 'decision') {
     return [
       {
-        label: 'Decision criteria',
+        label: 'Criteria',
         title: 'What matters most',
-        content: `Weigh speed, cost, strategic alignment, customer experience, and long-term flexibility before choosing a path for ${cleanTopic}.`
+        content: `Evaluate ${cleanPrompt} against cost, speed, strategic alignment, customer impact, and future flexibility before locking in a direction.`
       },
       {
-        label: 'Best-case',
-        title: 'Strong upside',
-        content: `The strongest option is the one that maximizes velocity while preserving room to adapt if user feedback shifts priorities.`
+        label: 'Upside',
+        title: 'Strongest option',
+        content: `Choose the path that creates the best balance of short-term momentum and long-term adaptability, especially if user feedback is likely to evolve.`
       },
       {
-        label: 'Risk check',
-        title: 'Where it could fail',
-        content: `The biggest risk is over-optimizing for a short-term win while ignoring operational complexity or team readiness.`
+        label: 'Risk',
+        title: 'Failure mode',
+        content: `The biggest failure mode is choosing a low-effort solution that feels attractive today but becomes costly or brittle after adoption.`
       },
       {
         label: 'Recommendation',
-        title: 'Suggested call',
-        content: `Choose the option with the best signal-to-effort ratio and validate it with a low-risk pilot before scaling.`
+        title: 'Decision call',
+        content: `Proceed with the option that maximizes signal-to-effort, then validate it through a low-risk pilot before scaling to a broader rollout.`
       }
     ];
   }
@@ -84,24 +99,24 @@ function buildCards(topic: string, mode: Mode): ThoughtCard[] {
   if (mode === 'plan') {
     return [
       {
-        label: 'Goal',
-        title: 'Outcome',
-        content: `Define the target outcome for ${cleanTopic} with measurable success indicators, practical constraints, and a firm timeline.`
+        label: 'Outcome',
+        title: 'Success target',
+        content: `Define the measurable outcome for ${cleanPrompt}, including what success looks like, what success does not look like, and the time horizon for change.`
       },
       {
-        label: 'Execution',
-        title: 'Key milestones',
-        content: `Break the project into small milestones: discovery, prototype, validation, and roll-out, with decision gates after each stage.`
+        label: 'Milestones',
+        title: 'Execution roadmap',
+        content: `Break the work into three to five checkpoints: discovery, prototype, validation, refinement, and final release, with explicit review points.`
       },
       {
         label: 'Dependencies',
-        title: 'Required support',
-        content: `Map any research, technical dependencies, launch approvals, or stakeholder alignment needed before moving to the next step.`
+        title: 'Support needed',
+        content: `Identify teams, tools, stakeholders, research, and approvals required to keep the plan realistic and avoid avoidable blockers.`
       },
       {
-        label: 'Momentum',
-        title: 'Weekly rhythm',
-        content: `Review progress weekly, surface risks early, and keep the plan adaptive to avoid stalling on low-impact decisions.`
+        label: 'Cadence',
+        title: 'Feedback loop',
+        content: `Review progress weekly, surface risk early, and protect time for iteration so the plan stays aligned with reality instead of assumptions.`
       }
     ];
   }
@@ -109,45 +124,67 @@ function buildCards(topic: string, mode: Mode): ThoughtCard[] {
   return [
     {
       label: 'Signal',
-      title: 'What is happening',
-      content: `The relevant pattern in ${cleanTopic} suggests a mix of opportunity, user need, and operational constraints that should be examined together.`
+      title: 'Current pattern',
+      content: `The strongest signal behind ${cleanPrompt} is a combination of user friction, strategic relevance, and the potential to create measurable value if it is addressed well.`
     },
     {
       label: 'Evidence',
-      title: 'Why it matters',
-      content: `Identify the strongest evidence, assumptions, and examples that either support or challenge the current direction of the concept.`
+      title: 'What supports it',
+      content: `Look for the clearest evidence, user statements, market cues, or operational patterns that support the interpretation and distinguish it from noise.`
     },
     {
       label: 'Interpretation',
       title: 'Meaning',
-      content: `The strongest interpretation is that the idea has traction only if it solves a real problem with clarity and measurable value.`
+      content: `The main takeaway is that the idea is promising only if the underlying need is real, urgent, and likely to repeat across a meaningful group of users.`
     },
     {
       label: 'Conclusion',
-      title: 'Actionable read',
-      content: `If the observed signal remains consistent under validation, pursue it with focused experiments and keep the most uncertain assumptions visible.`
-    }
-  ];
+      title: 'Next reading',
+      content: `Treat the current idea as a valuable hypothesis, then test it with focused evidence before committing resources or changing priorities.`
+      }
+    ];
+  }
 }
 
-const getInitialSessions = (): Session[] => {
-  if (typeof window === 'undefined') return [];
+function buildSummary(prompt: string, mode: Mode, profile: Profile) {
+  const normalized = prompt.trim() || 'a new opportunity';
+  return `A ${PROFILE_META[profile]} ${MODE_META[mode].label.toLowerCase()} session focused on ${normalized}.`;
+}
 
-  const saved = localStorage.getItem(storageKey);
-  if (!saved) return [];
+function getInitialSessions(): Session[] {
+  if (typeof window === 'undefined') return [];
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return [];
 
   try {
-    return JSON.parse(saved) as Session[];
+    return JSON.parse(raw) as Session[];
   } catch {
     return [];
   }
-};
+}
+
+function makeSession(prompt: string, mode: Mode, profile: Profile, cards: ThoughtCard[], titleOverride?: string): Session {
+  const title = titleOverride || titleFromPrompt(prompt);
+  return {
+    id: Date.now() + Math.random(),
+    title,
+    mode,
+    profile,
+    prompt: prompt.trim() || 'A new opportunity',
+    summary: buildSummary(prompt, mode, profile),
+    cards,
+    createdAt: new Date().toISOString()
+  };
+}
 
 export default function App() {
-  const [topic, setTopic] = useState('Build a values-driven AI assistant for product teams');
+  const [prompt, setPrompt] = useState('Build a values-driven AI assistant for product teams');
   const [mode, setMode] = useState<Mode>('brainstorm');
+  const [profile, setProfile] = useState<Profile>('balanced');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     setSessions(getInitialSessions());
@@ -155,36 +192,76 @@ export default function App() {
 
   useEffect(() => {
     if (sessions.length > 0) {
-      localStorage.setItem(storageKey, JSON.stringify(sessions));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
     }
   }, [sessions]);
 
-  const generatedSummary = useMemo(() => {
+  const activeSummary = useMemo(() => {
     if (!activeSession) return null;
-    return `${activeSession.title} • ${modeLabels[activeSession.mode]}`;
+    return `${activeSession.title} • ${MODE_META[activeSession.mode].label}`;
   }, [activeSession]);
 
-  const createSession = () => {
-    const trimmed = topic.trim();
-    const title = trimmed.length > 0 ? trimmed.slice(0, 42) : 'Untitled thought';
-    const cards = buildCards(trimmed || 'a new opportunity', mode);
-    const session: Session = {
-      id: Date.now(),
-      title,
-      mode,
-      summary: `A ${modeLabels[mode].toLowerCase()} session focused on ${trimmed || 'a new opportunity'}.`,
-      cards,
-      createdAt: new Date().toISOString()
-    };
-
-    setSessions((current) => [session, ...current].slice(0, 8));
+  const composeSession = (cards: ThoughtCard[], titleOverride?: string) => {
+    const trimmedPrompt = prompt.trim();
+    const session = makeSession(trimmedPrompt || 'A new opportunity', mode, profile, cards, titleOverride);
+    setSessions((current) => [session, ...current].slice(0, 12));
     setActiveSession(session);
   };
 
-  const exportMarkdown = () => {
+  async function generateSession() {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      setError('Add a prompt before generating the thought map.');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: trimmedPrompt, mode, profile })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to generate an AI thinking map.');
+      }
+
+      const cards = Array.isArray(data.cards) && data.cards.length > 0 ? data.cards : buildLocalCards(trimmedPrompt, mode);
+      const title = data.title || titleFromPrompt(trimmedPrompt);
+      const summary = data.summary || buildSummary(trimmedPrompt, mode, profile);
+      const session = {
+        id: Date.now() + Math.random(),
+        title,
+        mode,
+        profile,
+        prompt: trimmedPrompt,
+        summary,
+        cards,
+        createdAt: new Date().toISOString()
+      };
+
+      setSessions((current) => [session, ...current].slice(0, 12));
+      setActiveSession(session);
+    } catch (err) {
+      const fallbackCards = buildLocalCards(trimmedPrompt, mode);
+      const fallbackSession = makeSession(trimmedPrompt, mode, profile, fallbackCards);
+      setSessions((current) => [fallbackSession, ...current].slice(0, 12));
+      setActiveSession(fallbackSession);
+      setError(err instanceof Error ? err.message : 'AI generation failed. A local fallback was used instead.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  function exportMarkdown() {
     if (!activeSession) return;
 
-    const markdown = `# ${activeSession.title}\n\n- Mode: ${modeLabels[activeSession.mode]}\n- Created: ${new Date(activeSession.createdAt).toLocaleString()}\n\n${activeSession.cards
+    const markdown = `# ${activeSession.title}\n\n- Mode: ${MODE_META[activeSession.mode].label}\n- Profile: ${PROFILE_META[activeSession.profile]}\n- Created: ${new Date(activeSession.createdAt).toLocaleString()}\n\n${activeSession.cards
       .map((card) => `## ${card.title}\n${card.content}\n`)
       .join('\n')}`;
 
@@ -192,10 +269,10 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${activeSession.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'thought'}.md`;
+    anchor.download = `${activeSession.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'thinking-session'}.md`;
     anchor.click();
     URL.revokeObjectURL(url);
-  };
+  }
 
   return (
     <div className="app-shell">
@@ -213,22 +290,36 @@ export default function App() {
           <textarea
             id="topic"
             rows={6}
-            value={topic}
-            onChange={(event) => setTopic(event.target.value)}
-            placeholder="Describe the challenge, decision, or concept you want to explore..."
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Describe the challenge, decision, opportunity, or concept..."
           />
 
-          <label htmlFor="mode">Thinking mode</label>
-          <select id="mode" value={mode} onChange={(event) => setMode(event.target.value as Mode)}>
-            <option value="brainstorm">Brainstorm</option>
-            <option value="decision">Decision</option>
-            <option value="plan">Plan</option>
-            <option value="analysis">Analysis</option>
-          </select>
+          <div className="field-row">
+            <div className="field-block">
+              <label htmlFor="mode">Mode</label>
+              <select id="mode" value={mode} onChange={(event) => setMode(event.target.value as Mode)}>
+                {Object.entries(MODE_META).map(([key, meta]) => (
+                  <option key={key} value={key}>{meta.label}</option>
+                ))}
+              </select>
+            </div>
 
-          <button className="primary" onClick={createSession}>
-            Generate thinking map
+            <div className="field-block">
+              <label htmlFor="profile">Profile</label>
+              <select id="profile" value={profile} onChange={(event) => setProfile(event.target.value as Profile)}>
+                {Object.entries(PROFILE_META).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <button className="primary" onClick={generateSession} disabled={isGenerating}>
+            {isGenerating ? 'Thinking...' : 'Generate insight map'}
           </button>
+
+          {error ? <div className="error-box">{error}</div> : null}
         </div>
 
         <div className="recent-panel">
@@ -240,7 +331,7 @@ export default function App() {
               {sessions.map((session) => (
                 <li key={session.id} onClick={() => setActiveSession(session)}>
                   <strong>{session.title}</strong>
-                  <span>{modeLabels[session.mode]}</span>
+                  <span>{MODE_META[session.mode].label}</span>
                 </li>
               ))}
             </ul>
@@ -254,6 +345,7 @@ export default function App() {
             <p className="eyebrow">Working session</p>
             <h2>{activeSession ? activeSession.title : 'New thought board'}</h2>
           </div>
+
           <button className="secondary" onClick={exportMarkdown} disabled={!activeSession}>
             Export note
           </button>
@@ -261,17 +353,24 @@ export default function App() {
 
         {activeSession ? (
           <>
-            <section className="summary-card">
-              <div>
-                <p className="eyebrow">Session summary</p>
-                <h3>{generatedSummary}</h3>
+            <section className="summary-card" style={{ borderTop: `3px solid ${MODE_META[activeSession.mode].accent}` }}>
+              <div className="summary-header">
+                <div>
+                  <p className="eyebrow">Session summary</p>
+                  <h3>{activeSummary}</h3>
+                </div>
+                <span className="chip">{PROFILE_META[activeSession.profile]}</span>
               </div>
               <p>{activeSession.summary}</p>
+              <div className="meta-row">
+                <span>Prompt: {activeSession.prompt}</span>
+                <span>{new Date(activeSession.createdAt).toLocaleDateString()}</span>
+              </div>
             </section>
 
             <section className="card-grid">
               {activeSession.cards.map((card) => (
-                <article key={card.label} className="insight-card">
+                <article key={`${activeSession.id}-${card.title}`} className="insight-card">
                   <span className="label-pill">{card.label}</span>
                   <h4>{card.title}</h4>
                   <p>{card.content}</p>
@@ -281,10 +380,12 @@ export default function App() {
           </>
         ) : (
           <section className="empty-panel">
-            <h3>Start with a challenge</h3>
-            <p>
-              Use this workspace to run a brainstorm, compare options, build a plan, or analyze a complex idea.
-            </p>
+            <div>
+              <h3>Start with a challenge</h3>
+              <p>
+                Use this workspace to think through decisions, generate opportunities, build roadmaps, or analyze complex ideas.
+              </p>
+            </div>
           </section>
         )}
       </main>

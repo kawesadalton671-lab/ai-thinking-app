@@ -1,26 +1,43 @@
 # AI Thinking App
 
-A lightweight AI thinking workspace for brainstorming, evaluating options, planning execution, and analyzing complex ideas.
+A more advanced AI thinking workspace for brainstorming, deciding, planning, and analyzing complex topics with structured insight generation.
 
 ## Features
-- Prompt-based thinking sessions
-- Four modes: Brainstorm, Decision, Plan, and Analysis
-- Structured insight cards for key thinking areas
-- Recent session history persisted in local storage
-- Markdown export for sharing or recording decisions
-- Responsive single-page UI
+- Prompt-based workspace with dynamic reasoning modes
+- AI-powered generation via OpenAI-compatible API with graceful local fallback
+- Thinking profiles: Balanced, Ambitious, and Cautious
+- Recent session history and local persistence
+- Exportable Markdown notes
+- Responsive dashboard layout
 
-## Run locally
+## Local development
 
 ```bash
 npm install
-npm run dev -- --host 0.0.0.0
+npm run dev
 ```
 
-Then open the local URL shown in the terminal.
+This starts the Vite frontend and the Express API together.
 
-## Build
+## Environment
+
+Create a `.env` file in the project root with:
+
+```bash
+OPENAI_API_KEY=your_api_key_here
+PORT=4000
+```
+
+If no API key is configured, the app will still work using built-in local reasoning logic.
+
+## Production build
 
 ```bash
 npm run build
+```
+
+## Run the production server
+
+```bash
+npm start
 ```
