@@ -1,16 +1,13 @@
 # AI Thinking App
 
-A more advanced AI thinking workspace for brainstorming, deciding, planning, and analyzing complex topics with structured insight generation and project-based organization.
+MindForge is a full-stack AI thinking workspace for structured brainstorming, decisions, planning, analysis, and collaborative reasoning.
 
-## Features
-- Prompt-based workspace with dynamic reasoning modes
-- AI-powered generation via OpenAI-compatible API with graceful local fallback
-- Thinking profiles: Balanced, Ambitious, and Cautious
-- Smart prompt templates and strategic workspace management
-- Project-based session tracking with saved workspaces
-- Recent project dashboard and session metrics
-- Exportable Markdown notes
-- Responsive dashboard layout
+## Included upgrades
+- **A — Authentication:** account registration, sign-in, password hashing, bearer sessions, and sign-out.
+- **B — Persistence:** server-side JSON database in `data/mindforge.json`, ready to replace with Postgres/Supabase without changing the client API.
+- **C — Collaboration:** projects, members, invitations by registered email, roles, and shared team workspaces.
+- **D — AI chat threads:** persistent project conversations with user messages and AI follow-up responses.
+- AI thinking modes, profiles, saved sessions, project metrics, and Markdown export.
 
 ## Local development
 
@@ -19,27 +16,25 @@ npm install
 npm run dev
 ```
 
-This starts the Vite frontend and the Express API together.
+The Vite client runs on port 3000 and the Express API runs on port 4000. Data is persisted locally in `data/mindforge.json` and is ignored by Git.
 
 ## Environment
 
-Create a `.env` file in the project root with:
+Optional `.env`:
 
 ```bash
-OPENAI_API_KEY=your_api_key_here
 PORT=4000
+DATA_DIR=./data
+OPENAI_API_KEY=your_api_key_here
 ```
 
-If no API key is configured, the app still works with its built-in local reasoning logic.
+The current API includes a deterministic fallback generator, so the application works without an AI key. The `/api/generate` contract is intentionally isolated so an OpenAI, Anthropic, or Supabase Edge Function provider can be connected later.
 
 ## Production build
 
 ```bash
 npm run build
-```
-
-## Run the production server
-
-```bash
 npm start
 ```
+
+For production, replace the JSON persistence adapter with Postgres/Supabase, use a shared session store, and configure HTTPS, rate limiting, email invitations, and a secret-backed token store.

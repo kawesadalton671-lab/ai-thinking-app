@@ -1,609 +1,86 @@
 import { useEffect, useMemo, useState } from 'react';
 
+type User = { id: string; name: string; email: string };
 type Mode = 'brainstorm' | 'decision' | 'plan' | 'analysis';
 type Profile = 'balanced' | 'ambitious' | 'cautious';
+type Card = { label: string; title: string; content: string };
+type Session = { id: string; projectId?: string; title: string; prompt: string; mode: Mode; profile: Profile; summary: string; cards: Card[]; createdAt: string };
+type Member = { userId: string; role: string; user: User };
+type Project = { id: string; name: string; description: string; members: Member[]; createdAt: string };
+type Message = { id: string; author: string; role: string; text: string; createdAt: string };
 
-type ThoughtCard = {
-  label: string;
-  title: string;
-  content: string;
-};
-
-type Session = {
-  id: number;
-  title: string;
-  mode: Mode;
-  profile: Profile;
-  prompt: string;
-  summary: string;
-  cards: ThoughtCard[];
-  createdAt: string;
-  tags: string[];
-};
-
-type Project = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  sessions: Session[];
-};
-
-const MODE_META: Record<Mode, { label: string; accent: string }> = {
+const API = '/api';
+const modeMeta: Record<Mode, { label: string; accent: string }> = {
   brainstorm: { label: 'Brainstorm', accent: '#9c7bff' },
   decision: { label: 'Decision', accent: '#5bc0ff' },
   plan: { label: 'Plan', accent: '#4fd1a5' },
   analysis: { label: 'Analysis', accent: '#f4b860' }
 };
-
-const PROFILE_META: Record<Profile, string> = {
-  balanced: 'Balanced',
-  ambitious: 'Ambitious',
-  cautious: 'Cautious'
+const profiles: Record<Profile, string> = { balanced: 'Balanced', ambitious: 'Ambitious', cautious: 'Cautious' };
+const presets = ['Product launch', 'Decision review', 'Team roadmap', 'Research insight'];
+const presetPrompts: Record<string, string> = {
+  'Product launch': 'Design a customer-friendly AI launch plan for a new product in a crowded market.',
+  'Decision review': 'Compare two product strategies and decide which one best supports sustainable growth.',
+  'Team roadmap': 'Build a practical roadmap for a high-impact initiative with limited engineering capacity.',
+  'Research insight': 'Analyze user behavior signals and decide whether a new feature is worth pursuing.'
 };
 
-const STORAGE_KEY = 'mindforge-sessions-v2';
-const PROJECT_KEY = 'mindforge-projects-v2';
-
-const presetPrompts = [
-  {
-    label: 'Product launch',
-    value: 'Design a customer-friendly AI launch plan for a new product in a crowded market.'
-  },
-  {
-    label: 'Decision review',
-    value: 'Compare two product strategies and decide which one best supports sustainable growth.'
-  },
-  {
-    label: 'Team roadmap',
-    value: 'Build a practical roadmap for a high-impact initiative with limited engineering capacity.'
-  },
-  {
-    label: 'Research insight',
-    value: 'Analyze user behavior signals and decide whether a new feature is worth pursuing.'
-  }
-];
-
-function titleFromPrompt(prompt: string) {
-  const trimmed = prompt.trim();
-  if (!trimmed) return 'Untitled thought';
-  return trimmed.slice(0, 48).trim();
+async function request<T>(path: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('mindforge-token');
+  const response = await fetch(`${API}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  return data as T;
 }
 
-function inferTags(prompt: string, mode: Mode): string[] {
-  const words = prompt
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .slice(0, 5);
-
-  const tags = [...new Set([...words, mode])];
-  return tags.slice(0, 4);
-}
-
-function buildLocalCards(prompt: string, mode: Mode): ThoughtCard[] {
-  const cleanPrompt = prompt.trim() || 'a new opportunity';
-  const words = cleanPrompt.split(/\s+/).filter(Boolean);
-  const lead = words.slice(0, 3).join(' ') || 'the challenge';
-
-  if (mode === 'brainstorm') {
-    return [
-      {
-        label: 'Core idea',
-        title: 'Opportunity framing',
-        content: `Frame ${cleanPrompt} as a meaningful user problem and highlight the value it creates for people who feel the pain most strongly.`
-      },
-      {
-        label: 'Creative direction',
-        title: 'Divergent options',
-        content: `Generate a few unexpected angles around ${lead}, then test which ones create the strongest emotional pull without increasing complexity too much.`
-      },
-      {
-        label: 'Risk signal',
-        title: 'Frictions to watch',
-        content: `Check for trust issues, adoption friction, unclear incentives, and hidden dependencies that could slow momentum before launch.`
-      },
-      {
-        label: 'Action path',
-        title: 'Fastest next move',
-        content: `Run a concept test with a narrow audience, gather feedback, and use the response to sharpen the strongest idea before expanding scope.`
-      }
-    ];
-  }
-
-  if (mode === 'decision') {
-    return [
-      {
-        label: 'Criteria',
-        title: 'What matters most',
-        content: `Evaluate ${cleanPrompt} against cost, speed, strategic alignment, customer impact, and future flexibility before locking in a direction.`
-      },
-      {
-        label: 'Upside',
-        title: 'Strongest option',
-        content: `Choose the path that creates the best balance of short-term momentum and long-term adaptability, especially if user feedback is likely to evolve.`
-      },
-      {
-        label: 'Risk',
-        title: 'Failure mode',
-        content: `The biggest failure mode is choosing a low-effort solution that feels attractive today but becomes costly or brittle after adoption.`
-      },
-      {
-        label: 'Recommendation',
-        title: 'Decision call',
-        content: `Proceed with the option that maximizes signal-to-effort, then validate it through a low-risk pilot before scaling to a broader rollout.`
-      }
-    ];
-  }
-
-  if (mode === 'plan') {
-    return [
-      {
-        label: 'Outcome',
-        title: 'Success target',
-        content: `Define the measurable outcome for ${cleanPrompt}, including what success looks like, what success does not look like, and the time horizon for change.`
-      },
-      {
-        label: 'Milestones',
-        title: 'Execution roadmap',
-        content: `Break the work into three to five checkpoints: discovery, prototype, validation, refinement, and final release, with explicit review points.`
-      },
-      {
-        label: 'Dependencies',
-        title: 'Support needed',
-        content: `Identify teams, tools, stakeholders, research, and approvals required to keep the plan realistic and avoid avoidable blockers.`
-      },
-      {
-        label: 'Cadence',
-        title: 'Feedback loop',
-        content: `Review progress weekly, surface risk early, and protect time for iteration so the plan stays aligned with reality instead of assumptions.`
-      }
-    ];
-  }
-
-  return [
-    {
-      label: 'Signal',
-      title: 'Current pattern',
-      content: `The strongest signal behind ${cleanPrompt} is a combination of user friction, strategic relevance, and the potential to create measurable value if addressed well.`
-    },
-    {
-      label: 'Evidence',
-      title: 'What supports it',
-      content: `Look for the clearest evidence, user statements, market cues, or operational patterns that support the interpretation and distinguish it from noise.`
-    },
-    {
-      label: 'Interpretation',
-      title: 'Meaning',
-      content: `The main takeaway is that the idea is promising only if the underlying need is real, urgent, and likely to repeat across a meaningful group of users.`
-    },
-    {
-      label: 'Conclusion',
-      title: 'Next reading',
-      content: `Treat the current idea as a valuable hypothesis, then test it with focused evidence before committing resources or changing priorities.`
-    }
-  ];
-}
-
-function buildSummary(prompt: string, mode: Mode, profile: Profile) {
-  const normalized = prompt.trim() || 'a new opportunity';
-  return `A ${PROFILE_META[profile]} ${MODE_META[mode].label.toLowerCase()} session focused on ${normalized}.`;
-}
-
-function buildProjectFromSession(session: Session): Project {
-  return {
-    id: `project-${Date.now()}`,
-    name: 'Strategy Workspace',
-    description: 'Prompt-driven idea development and decision support.',
-    createdAt: new Date().toISOString(),
-    sessions: [session]
+function AuthScreen({ onSignedIn }: { onSignedIn: (user: User, token: string) => void }) {
+  const [registering, setRegistering] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setError('');
+    try {
+      const data = await request<{ user: User; token: string }>(registering ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify(registering ? { name, email, password } : { email, password }) });
+      localStorage.setItem('mindforge-token', data.token); onSignedIn(data.user, data.token);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to authenticate.'); }
   };
-}
-
-function getInitialProjects(): Project[] {
-  if (typeof window === 'undefined') return [];
-  const raw = localStorage.getItem(PROJECT_KEY);
-  if (!raw) return [];
-
-  try {
-    return JSON.parse(raw) as Project[];
-  } catch {
-    return [];
-  }
-}
-
-function getInitialSessions(): Session[] {
-  if (typeof window === 'undefined') return [];
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [];
-
-  try {
-    return JSON.parse(raw) as Session[];
-  } catch {
-    return [];
-  }
-}
-
-function makeSession(prompt: string, mode: Mode, profile: Profile, cards: ThoughtCard[], titleOverride?: string): Session {
-  const title = titleOverride || titleFromPrompt(prompt);
-  return {
-    id: Date.now() + Math.random(),
-    title,
-    mode,
-    profile,
-    prompt: prompt.trim() || 'A new opportunity',
-    summary: buildSummary(prompt, mode, profile),
-    cards,
-    createdAt: new Date().toISOString(),
-    tags: inferTags(prompt, mode)
-  };
-}
-
-function persistSessionToProject(projects: Project[], projectId: string | null, session: Session): Project[] {
-  const safeProjectId = projectId || 'workspace-default';
-  const existingIndex = projects.findIndex((project) => project.id === safeProjectId);
-
-  if (existingIndex >= 0) {
-    const nextProjects = [...projects];
-    const target = nextProjects[existingIndex];
-    const sessions = [session, ...target.sessions].slice(0, 10);
-    nextProjects[existingIndex] = { ...target, sessions, description: target.description || 'Updated project workspace.' };
-    return nextProjects;
-  }
-
-  const newProject: Project = {
-    id: safeProjectId,
-    name: 'Strategy Workspace',
-    description: 'Updated project workspace.',
-    createdAt: new Date().toISOString(),
-    sessions: [session]
-  };
-
-  return [newProject, ...projects];
+  return <main className="auth-shell"><section className="auth-card"><div className="brand-mark">M</div><p className="eyebrow">Private thinking workspace</p><h1>{registering ? 'Create your MindForge account' : 'Welcome back'}</h1><p className="muted">Keep your ideas, decisions, and team conversations in one focused space.</p><form onSubmit={submit}>{registering && <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />}<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" /><input required minLength={6} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (6+ characters)" />{error && <div className="error-box">{error}</div>}<button className="primary">{registering ? 'Create account' : 'Sign in'}</button></form><button className="link-button" onClick={() => setRegistering(!registering)}>{registering ? 'Already have an account? Sign in' : 'Create a new account'}</button></section></main>;
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState('Build a values-driven AI assistant for product teams');
   const [mode, setMode] = useState<Mode>('brainstorm');
   const [profile, setProfile] = useState<Profile>('balanced');
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState('Strategy Workspace');
-  const [projectDescription, setProjectDescription] = useState('Prompt-driven idea development and decision support.');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('');
+  const [message, setMessage] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const loadedProjects = getInitialProjects();
-    const loadedSessions = getInitialSessions();
-
-    if (loadedProjects.length > 0) {
-      setProjects(loadedProjects);
-      setActiveProjectId(loadedProjects[0].id);
-      setProjectName(loadedProjects[0].name);
-      setProjectDescription(loadedProjects[0].description);
-    } else {
-      const workspace = buildProjectFromSession(
-        makeSession('Start with a focused challenge.', 'brainstorm', 'balanced', buildLocalCards('Start with a focused challenge.', 'brainstorm'))
-      );
-      setProjects([workspace]);
-      setActiveProjectId(workspace.id);
-      setProjectName(workspace.name);
-      setProjectDescription(workspace.description);
-    }
-
-    if (loadedSessions.length > 0) {
-      setSessions(loadedSessions);
-      setActiveSession(loadedSessions[0]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (sessions.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-    }
-  }, [sessions]);
-
-  useEffect(() => {
-    if (projects.length > 0) {
-      localStorage.setItem(PROJECT_KEY, JSON.stringify(projects));
-    }
-  }, [projects]);
-
-  const activeProject = useMemo(
-    () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null,
-    [projects, activeProjectId]
-  );
-
-  const activeSummary = useMemo(() => {
-    if (!activeSession) return null;
-    return `${activeSession.title} • ${MODE_META[activeSession.mode].label}`;
-  }, [activeSession]);
-
-  const projectMetrics = useMemo(() => {
-    if (!activeProject) return { totalSessions: 0, totalCards: 0, uniqueModes: 0, lastUpdated: '—' };
-
-    const totalSessions = activeProject.sessions.length;
-    const totalCards = activeProject.sessions.reduce((sum, session) => sum + session.cards.length, 0);
-    const uniqueModes = new Set(activeProject.sessions.map((session) => session.mode)).size;
-    const lastUpdated = activeProject.sessions[0]?.createdAt
-      ? new Date(activeProject.sessions[0].createdAt).toLocaleDateString()
-      : '—';
-
-    return { totalSessions, totalCards, uniqueModes, lastUpdated };
-  }, [activeProject]);
-
-  function createProject() {
-    const trimmed = projectName.trim() || 'New Strategy Workspace';
-    const project: Project = {
-      id: `project-${Date.now()}`,
-      name: trimmed,
-      description: projectDescription.trim() || 'Prompt-driven idea development and decision support.',
-      createdAt: new Date().toISOString(),
-      sessions: []
-    };
-
-    setProjects((current) => [project, ...current]);
-    setActiveProjectId(project.id);
+  async function loadWorkspace() {
+    const data = await request<{ projects: Project[] }>('/projects');
+    setProjects(data.projects); const project = data.projects[0] || null; setActiveProject(project);
+    if (project) { const [saved, chat] = await Promise.all([request<{ sessions: Session[] }>(`/projects/${project.id}/sessions`), request<{ messages: Message[] }>(`/projects/${project.id}/messages`)]); setSessions(saved.sessions); setMessages(chat.messages); setActiveSession(saved.sessions[0] || null); }
   }
+  useEffect(() => { const token = localStorage.getItem('mindforge-token'); if (token) request<{ user: User }>('/me').then((data) => { setUser(data.user); loadWorkspace(); }).catch(() => localStorage.removeItem('mindforge-token')); }, []);
 
-  function saveCurrentSessionToProject() {
-    if (!activeSession) return;
+  const metrics = useMemo(() => ({ sessions: sessions.length, cards: sessions.reduce((sum, item) => sum + item.cards.length, 0), members: activeProject?.members.length || 0 }), [sessions, activeProject]);
+  const signOut = () => { localStorage.removeItem('mindforge-token'); setUser(null); };
+  const selectProject = async (project: Project) => { setActiveProject(project); const [saved, chat] = await Promise.all([request<{ sessions: Session[] }>(`/projects/${project.id}/sessions`), request<{ messages: Message[] }>(`/projects/${project.id}/messages`)]); setSessions(saved.sessions); setMessages(chat.messages); setActiveSession(saved.sessions[0] || null); };
+  const createProject = async () => { const name = window.prompt('Workspace name', 'New strategy workspace'); if (!name) return; const data = await request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify({ name, description: 'A shared space for structured thinking.' }) }); setProjects((items) => [data.project, ...items]); setActiveProject(data.project); setSessions([]); setMessages([]); setActiveSession(null); };
+  const generate = async () => { if (!activeProject || !prompt.trim()) return; setLoading(true); setError(''); try { const generated = await request<{ title: string; summary: string; cards: Card[] }>('/generate', { method: 'POST', body: JSON.stringify({ prompt, mode, profile }) }); const data = await request<{ session: Session }>(`/projects/${activeProject.id}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, mode, profile, ...generated }) }); setSessions((items) => [data.session, ...items]); setActiveSession(data.session); } catch (err) { setError(err instanceof Error ? err.message : 'Generation failed.'); } finally { setLoading(false); } };
+  const sendMessage = async (event: React.FormEvent) => { event.preventDefault(); if (!activeProject || !message.trim()) return; try { const data = await request<{ messages: Message[] }>(`/projects/${activeProject.id}/messages`, { method: 'POST', body: JSON.stringify({ text: message }) }); setMessages((items) => [...items, ...data.messages]); setMessage(''); } catch (err) { setError(err instanceof Error ? err.message : 'Message failed.'); } };
+  const invite = async () => { if (!activeProject || !inviteEmail.trim()) return; try { const data = await request<{ project: Project }>(`/projects/${activeProject.id}/members`, { method: 'POST', body: JSON.stringify({ email: inviteEmail }) }); setActiveProject(data.project); setProjects((items) => items.map((item) => item.id === data.project.id ? data.project : item)); setInviteEmail(''); } catch (err) { setError(err instanceof Error ? err.message : 'Invite failed.'); } };
+  const exportNote = () => { if (!activeSession) return; const text = `# ${activeSession.title}\n\n${activeSession.summary}\n\n${activeSession.cards.map((card) => `## ${card.title}\n${card.content}`).join('\n\n')}`; const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'mindforge-session.md'; anchor.click(); URL.revokeObjectURL(url); };
 
-    setProjects((current) => persistSessionToProject(current, activeProjectId, activeSession));
-    const targetProject = activeProject || { id: activeProjectId || 'workspace-default', name: projectName, description: projectDescription, createdAt: new Date().toISOString(), sessions: [] };
-    setProjectName(targetProject.name);
-    setProjectDescription(targetProject.description);
-  }
+  if (!user) return <AuthScreen onSignedIn={(nextUser) => { setUser(nextUser); loadWorkspace(); }} />;
 
-  async function generateSession() {
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt) {
-      setError('Add a prompt before generating the thought map.');
-      return;
-    }
-
-    setIsGenerating(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: trimmedPrompt, mode, profile })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Unable to generate an AI thinking map.');
-      }
-
-      const cards = Array.isArray(data.cards) && data.cards.length > 0 ? data.cards : buildLocalCards(trimmedPrompt, mode);
-      const session = makeSession(trimmedPrompt, mode, profile, cards, data.title || titleFromPrompt(trimmedPrompt));
-
-      session.summary = data.summary || session.summary;
-      setSessions((current) => [session, ...current].slice(0, 12));
-      setActiveSession(session);
-      setProjects((current) => persistSessionToProject(current, activeProjectId, session));
-      if (selectedPreset) setSelectedPreset('');
-    } catch (err) {
-      const fallbackCards = buildLocalCards(trimmedPrompt, mode);
-      const fallbackSession = makeSession(trimmedPrompt, mode, profile, fallbackCards);
-
-      setSessions((current) => [fallbackSession, ...current].slice(0, 12));
-      setActiveSession(fallbackSession);
-      setProjects((current) => persistSessionToProject(current, activeProjectId, fallbackSession));
-      setError(
-        err instanceof Error ? err.message : 'AI generation failed. A local fallback was used instead.'
-      );
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  function exportMarkdown() {
-    if (!activeSession) return;
-
-    const markdown = `# ${activeSession.title}\n\n- Mode: ${MODE_META[activeSession.mode].label}\n- Profile: ${PROFILE_META[activeSession.profile]}\n- Created: ${new Date(activeSession.createdAt).toLocaleString()}\n\n${activeSession.cards
-      .map((card) => `## ${card.title}\n${card.content}\n`)
-      .join('\n')}`;
-
-    const blob = new Blob([markdown], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${activeSession.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'thinking-session'}.md`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <div className="brand-mark">M</div>
-          <div>
-            <p className="eyebrow">AI workspace</p>
-            <h1>MindForge</h1>
-          </div>
-        </div>
-
-        <div className="panel project-panel">
-          <label htmlFor="project-name">Project</label>
-          <input
-            id="project-name"
-            value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
-            placeholder="Strategy Workspace"
-          />
-
-          <label htmlFor="project-description">Project brief</label>
-          <textarea
-            id="project-description"
-            rows={3}
-            value={projectDescription}
-            onChange={(event) => setProjectDescription(event.target.value)}
-            placeholder="Describe the initiative, goal, or team context."
-          />
-
-          <div className="inline-actions">
-            <button className="secondary small" onClick={createProject}>New project</button>
-            <button className="secondary small" onClick={saveCurrentSessionToProject} disabled={!activeSession}>Save session</button>
-          </div>
-        </div>
-
-        <div className="metrics-panel">
-          <h2>Project snapshot</h2>
-          <div className="metric-grid">
-            <div className="metric-box">
-              <strong>{projectMetrics.totalSessions}</strong>
-              <span>Sessions</span>
-            </div>
-            <div className="metric-box">
-              <strong>{projectMetrics.totalCards}</strong>
-              <span>Cards</span>
-            </div>
-            <div className="metric-box">
-              <strong>{projectMetrics.uniqueModes}</strong>
-              <span>Modes</span>
-            </div>
-            <div className="metric-box">
-              <strong>{projectMetrics.lastUpdated}</strong>
-              <span>Updated</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="panel">
-          <label htmlFor="topic">Thinking prompt</label>
-          <textarea
-            id="topic"
-            rows={6}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Describe the challenge, decision, opportunity, or concept..."
-          />
-
-          <div className="field-row">
-            <div className="field-block">
-              <label htmlFor="mode">Mode</label>
-              <select id="mode" value={mode} onChange={(event) => setMode(event.target.value as Mode)}>
-                {Object.entries(MODE_META).map(([key, meta]) => (
-                  <option key={key} value={key}>{meta.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field-block">
-              <label htmlFor="profile">Profile</label>
-              <select id="profile" value={profile} onChange={(event) => setProfile(event.target.value as Profile)}>
-                {Object.entries(PROFILE_META).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <label htmlFor="preset">Prompt template</label>
-          <select
-            id="preset"
-            value={selectedPreset}
-            onChange={(event) => {
-              const value = event.target.value;
-              setSelectedPreset(value);
-              const selected = presetPrompts.find((item) => item.label === value);
-              if (selected) setPrompt(selected.value);
-            }}
-          >
-            <option value="">Custom prompt</option>
-            {presetPrompts.map((preset) => (
-              <option key={preset.label} value={preset.label}>{preset.label}</option>
-            ))}
-          </select>
-
-          <button className="primary" onClick={generateSession} disabled={isGenerating}>
-            {isGenerating ? 'Thinking...' : 'Generate insight map'}
-          </button>
-
-          {error ? <div className="error-box">{error}</div> : null}
-        </div>
-
-        <div className="recent-panel">
-          <h2>Projects</h2>
-          {projects.length === 0 ? (
-            <p className="empty-state">No projects yet.</p>
-          ) : (
-            <ul>
-              {projects.map((project) => (
-                <li key={project.id} onClick={() => setActiveProjectId(project.id)}>
-                  <strong>{project.name}</strong>
-                  <span>{project.sessions.length} saved sessions</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </aside>
-
-      <main className="content">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Working session</p>
-            <h2>{activeSession ? activeSession.title : 'New thought board'}</h2>
-          </div>
-
-          <button className="secondary" onClick={exportMarkdown} disabled={!activeSession}>
-            Export note
-          </button>
-        </header>
-
-        {activeSession ? (
-          <>
-            <section className="summary-card" style={{ borderTop: `3px solid ${MODE_META[activeSession.mode].accent}` }}>
-              <div className="summary-header">
-                <div>
-                  <p className="eyebrow">Session summary</p>
-                  <h3>{activeSummary}</h3>
-                </div>
-                <span className="chip">{PROFILE_META[activeSession.profile]}</span>
-              </div>
-              <p>{activeSession.summary}</p>
-              <div className="meta-row">
-                <span>{activeSession.prompt}</span>
-                <span>{new Date(activeSession.createdAt).toLocaleDateString()}</span>
-              </div>
-              <div className="tag-row">
-                {activeSession.tags.map((tag) => (
-                  <span key={`${activeSession.id}-${tag}`} className="tag-chip">#{tag}</span>
-                ))}
-              </div>
-            </section>
-
-            <section className="card-grid">
-              {activeSession.cards.map((card) => (
-                <article key={`${activeSession.id}-${card.title}`} className="insight-card">
-                  <span className="label-pill">{card.label}</span>
-                  <h4>{card.title}</h4>
-                  <p>{card.content}</p>
-                </article>
-              ))}
-            </section>
-          </>
-        ) : (
-          <section className="empty-panel">
-            <div>
-              <h3>Start with a challenge</h3>
-              <p>
-                Use this workspace to think through decisions, generate opportunities, build roadmaps, or analyze complex ideas.
-              </p>
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
-  );
+  return <div className="app-shell"><aside className="sidebar"><div className="brand-block"><div className="brand-mark">M</div><div><p className="eyebrow">AI workspace</p><h1>MindForge</h1></div></div><div className="user-bar"><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}</strong><small>{user.email}</small></div><button className="icon-button" onClick={signOut} title="Sign out">↪</button></div><div className="panel"><div className="section-heading"><h2>Workspaces</h2><button className="icon-button" onClick={createProject}>+</button></div>{projects.map((project) => <button className={`project-item ${activeProject?.id === project.id ? 'selected' : ''}`} key={project.id} onClick={() => selectProject(project)}><strong>{project.name}</strong><span>{project.members.length} members</span></button>)}</div><div className="panel composer"><label>Thinking prompt</label><textarea rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} /><div className="field-row"><select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>{Object.entries(modeMeta).map(([key, meta]) => <option key={key} value={key}>{meta.label}</option>)}</select><select value={profile} onChange={(e) => setProfile(e.target.value as Profile)}>{Object.entries(profiles).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div><select defaultValue="" onChange={(e) => { if (e.target.value) setPrompt(presetPrompts[e.target.value]); }}><option value="">Prompt template</option>{presets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select><button className="primary" onClick={generate} disabled={loading || !activeProject}>{loading ? 'Thinking...' : 'Generate insight map'}</button>{error && <div className="error-box">{error}</div>}</div><div className="metrics"><div><strong>{metrics.sessions}</strong><span>Sessions</span></div><div><strong>{metrics.cards}</strong><span>Insight cards</span></div><div><strong>{metrics.members}</strong><span>Members</span></div></div></aside><main className="content"><header className="topbar"><div><p className="eyebrow">{activeProject?.name || 'Workspace'}</p><h2>{activeSession?.title || 'New thought board'}</h2></div><button className="secondary" onClick={exportNote} disabled={!activeSession}>Export note</button></header>{activeSession ? <section className="summary-card" style={{ borderTop: `3px solid ${modeMeta[activeSession.mode].accent}` }}><div className="summary-header"><div><p className="eyebrow">{modeMeta[activeSession.mode].label} session</p><h3>{activeSession.title}</h3></div><span className="chip">{profiles[activeSession.profile]}</span></div><p>{activeSession.summary}</p><div className="card-grid">{activeSession.cards.map((card) => <article className="insight-card" key={`${activeSession.id}-${card.title}`}><span className="label-pill">{card.label}</span><h4>{card.title}</h4><p>{card.content}</p></article>)}</div></section> : <section className="empty-panel"><h3>Choose a workspace and start thinking</h3><p>Generate a map, save it to your project, and invite teammates to continue the reasoning together.</p></section>}<section className="collaboration-grid"><div className="panel thread-panel"><div className="section-heading"><div><p className="eyebrow">Shared thread</p><h3>Team conversation</h3></div><span className="chip">{messages.length} messages</span></div><div className="messages">{messages.length ? messages.map((item) => <div className={`message ${item.role}`} key={item.id}><span className="message-author">{item.author}</span><p>{item.text}</p></div>) : <p className="muted">No messages yet. Ask the team a question about this workspace.</p>}</div><form className="message-form" onSubmit={sendMessage}><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Ask a follow-up or leave a note..." /><button className="primary">Send</button></form></div><div className="panel members-panel"><p className="eyebrow">Collaboration</p><h3>Workspace members</h3>{activeProject?.members.map((member) => <div className="member" key={member.userId}><span className="avatar">{member.user.name.slice(0, 1).toUpperCase()}</span><div><strong>{member.user.name}</strong><small>{member.user.email}</small></div><span className="role">{member.role}</span></div>)}<div className="invite"><input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="Teammate email" /><button className="secondary" onClick={invite}>Invite</button></div></div></section></main></div>;
 }
