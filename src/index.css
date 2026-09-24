@@ -78,7 +78,7 @@ h1, h2, h3, h4, p {
 
 h1 { margin: 0; font-size: 1.7rem; }
 
-.panel, .recent-panel, .summary-card, .insight-card, .empty-panel {
+.panel, .recent-panel, .metrics-panel, .summary-card, .insight-card, .empty-panel {
   background: rgba(15, 24, 36, 0.9);
   border: 1px solid rgba(176, 190, 255, 0.12);
   border-radius: 20px;
@@ -90,6 +90,10 @@ h1 { margin: 0; font-size: 1.7rem; }
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.project-panel {
+  margin-bottom: 18px;
 }
 
 .field-row {
@@ -109,18 +113,32 @@ label {
   font-size: 0.78rem;
 }
 
-textarea, select {
+input, textarea, select {
   width: 100%;
   border: 1px solid rgba(174, 192, 255, 0.18);
   border-radius: 12px;
   background: rgba(19, 31, 47, 0.82);
   color: #eff5ff;
   padding: 12px 14px;
+}
+
+textarea {
   resize: vertical;
 }
 
-textarea:focus, select:focus {
+textarea:focus, select:focus, input:focus {
   outline: 2px solid rgba(116, 143, 255, 0.5);
+}
+
+.inline-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.small {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 0.8rem;
 }
 
 .primary, .secondary {
@@ -159,6 +177,43 @@ textarea:focus, select:focus {
   border: 1px solid rgba(255, 109, 109, 0.24);
   color: #ffb7b7;
   font-size: 0.82rem;
+}
+
+.metrics-panel {
+  margin-bottom: 18px;
+  padding: 16px 14px;
+}
+
+.metrics-panel h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  padding: 0 8px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 10px;
+  border-radius: 12px;
+  background: rgba(23, 36, 58, 0.8);
+  border: 1px solid rgba(177, 193, 255, 0.08);
+}
+
+.metric-box strong {
+  color: #eff5ff;
+  font-size: 1.05rem;
+}
+
+.metric-box span {
+  color: #8ea5d8;
+  font-size: 0.72rem;
 }
 
 .recent-panel {
@@ -262,6 +317,24 @@ textarea:focus, select:focus {
   margin-top: 14px;
   color: #9cb0d8;
   font-size: 0.8rem;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(88, 115, 255, 0.12);
+  border: 1px solid rgba(88, 115, 255, 0.12);
+  color: #d9e3ff;
+  font-size: 0.7rem;
 }
 
 .card-grid {

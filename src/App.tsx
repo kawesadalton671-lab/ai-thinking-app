@@ -18,6 +18,15 @@ type Session = {
   summary: string;
   cards: ThoughtCard[];
   createdAt: string;
+  tags: string[];
+};
+
+type Project = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  sessions: Session[];
 };
 
 const MODE_META: Record<Mode, { label: string; accent: string }> = {
@@ -34,11 +43,42 @@ const PROFILE_META: Record<Profile, string> = {
 };
 
 const STORAGE_KEY = 'mindforge-sessions-v2';
+const PROJECT_KEY = 'mindforge-projects-v2';
+
+const presetPrompts = [
+  {
+    label: 'Product launch',
+    value: 'Design a customer-friendly AI launch plan for a new product in a crowded market.'
+  },
+  {
+    label: 'Decision review',
+    value: 'Compare two product strategies and decide which one best supports sustainable growth.'
+  },
+  {
+    label: 'Team roadmap',
+    value: 'Build a practical roadmap for a high-impact initiative with limited engineering capacity.'
+  },
+  {
+    label: 'Research insight',
+    value: 'Analyze user behavior signals and decide whether a new feature is worth pursuing.'
+  }
+];
 
 function titleFromPrompt(prompt: string) {
   const trimmed = prompt.trim();
   if (!trimmed) return 'Untitled thought';
   return trimmed.slice(0, 48).trim();
+}
+
+function inferTags(prompt: string, mode: Mode): string[] {
+  const words = prompt
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 5);
+
+  const tags = [...new Set([...words, mode])];
+  return tags.slice(0, 4);
 }
 
 function buildLocalCards(prompt: string, mode: Mode): ThoughtCard[] {
@@ -125,7 +165,7 @@ function buildLocalCards(prompt: string, mode: Mode): ThoughtCard[] {
     {
       label: 'Signal',
       title: 'Current pattern',
-      content: `The strongest signal behind ${cleanPrompt} is a combination of user friction, strategic relevance, and the potential to create measurable value if it is addressed well.`
+      content: `The strongest signal behind ${cleanPrompt} is a combination of user friction, strategic relevance, and the potential to create measurable value if addressed well.`
     },
     {
       label: 'Evidence',
@@ -141,14 +181,35 @@ function buildLocalCards(prompt: string, mode: Mode): ThoughtCard[] {
       label: 'Conclusion',
       title: 'Next reading',
       content: `Treat the current idea as a valuable hypothesis, then test it with focused evidence before committing resources or changing priorities.`
-      }
-    ];
-  }
+    }
+  ];
 }
 
 function buildSummary(prompt: string, mode: Mode, profile: Profile) {
   const normalized = prompt.trim() || 'a new opportunity';
   return `A ${PROFILE_META[profile]} ${MODE_META[mode].label.toLowerCase()} session focused on ${normalized}.`;
+}
+
+function buildProjectFromSession(session: Session): Project {
+  return {
+    id: `project-${Date.now()}`,
+    name: 'Strategy Workspace',
+    description: 'Prompt-driven idea development and decision support.',
+    createdAt: new Date().toISOString(),
+    sessions: [session]
+  };
+}
+
+function getInitialProjects(): Project[] {
+  if (typeof window === 'undefined') return [];
+  const raw = localStorage.getItem(PROJECT_KEY);
+  if (!raw) return [];
+
+  try {
+    return JSON.parse(raw) as Project[];
+  } catch {
+    return [];
+  }
 }
 
 function getInitialSessions(): Session[] {
@@ -173,8 +234,32 @@ function makeSession(prompt: string, mode: Mode, profile: Profile, cards: Though
     prompt: prompt.trim() || 'A new opportunity',
     summary: buildSummary(prompt, mode, profile),
     cards,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    tags: inferTags(prompt, mode)
   };
+}
+
+function persistSessionToProject(projects: Project[], projectId: string | null, session: Session): Project[] {
+  const safeProjectId = projectId || 'workspace-default';
+  const existingIndex = projects.findIndex((project) => project.id === safeProjectId);
+
+  if (existingIndex >= 0) {
+    const nextProjects = [...projects];
+    const target = nextProjects[existingIndex];
+    const sessions = [session, ...target.sessions].slice(0, 10);
+    nextProjects[existingIndex] = { ...target, sessions, description: target.description || 'Updated project workspace.' };
+    return nextProjects;
+  }
+
+  const newProject: Project = {
+    id: safeProjectId,
+    name: 'Strategy Workspace',
+    description: 'Updated project workspace.',
+    createdAt: new Date().toISOString(),
+    sessions: [session]
+  };
+
+  return [newProject, ...projects];
 }
 
 export default function App() {
@@ -183,11 +268,37 @@ export default function App() {
   const [profile, setProfile] = useState<Profile>('balanced');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState('Strategy Workspace');
+  const [projectDescription, setProjectDescription] = useState('Prompt-driven idea development and decision support.');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setSessions(getInitialSessions());
+    const loadedProjects = getInitialProjects();
+    const loadedSessions = getInitialSessions();
+
+    if (loadedProjects.length > 0) {
+      setProjects(loadedProjects);
+      setActiveProjectId(loadedProjects[0].id);
+      setProjectName(loadedProjects[0].name);
+      setProjectDescription(loadedProjects[0].description);
+    } else {
+      const workspace = buildProjectFromSession(
+        makeSession('Start with a focused challenge.', 'brainstorm', 'balanced', buildLocalCards('Start with a focused challenge.', 'brainstorm'))
+      );
+      setProjects([workspace]);
+      setActiveProjectId(workspace.id);
+      setProjectName(workspace.name);
+      setProjectDescription(workspace.description);
+    }
+
+    if (loadedSessions.length > 0) {
+      setSessions(loadedSessions);
+      setActiveSession(loadedSessions[0]);
+    }
   }, []);
 
   useEffect(() => {
@@ -196,17 +307,57 @@ export default function App() {
     }
   }, [sessions]);
 
+  useEffect(() => {
+    if (projects.length > 0) {
+      localStorage.setItem(PROJECT_KEY, JSON.stringify(projects));
+    }
+  }, [projects]);
+
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null,
+    [projects, activeProjectId]
+  );
+
   const activeSummary = useMemo(() => {
     if (!activeSession) return null;
     return `${activeSession.title} • ${MODE_META[activeSession.mode].label}`;
   }, [activeSession]);
 
-  const composeSession = (cards: ThoughtCard[], titleOverride?: string) => {
-    const trimmedPrompt = prompt.trim();
-    const session = makeSession(trimmedPrompt || 'A new opportunity', mode, profile, cards, titleOverride);
-    setSessions((current) => [session, ...current].slice(0, 12));
-    setActiveSession(session);
-  };
+  const projectMetrics = useMemo(() => {
+    if (!activeProject) return { totalSessions: 0, totalCards: 0, uniqueModes: 0, lastUpdated: '—' };
+
+    const totalSessions = activeProject.sessions.length;
+    const totalCards = activeProject.sessions.reduce((sum, session) => sum + session.cards.length, 0);
+    const uniqueModes = new Set(activeProject.sessions.map((session) => session.mode)).size;
+    const lastUpdated = activeProject.sessions[0]?.createdAt
+      ? new Date(activeProject.sessions[0].createdAt).toLocaleDateString()
+      : '—';
+
+    return { totalSessions, totalCards, uniqueModes, lastUpdated };
+  }, [activeProject]);
+
+  function createProject() {
+    const trimmed = projectName.trim() || 'New Strategy Workspace';
+    const project: Project = {
+      id: `project-${Date.now()}`,
+      name: trimmed,
+      description: projectDescription.trim() || 'Prompt-driven idea development and decision support.',
+      createdAt: new Date().toISOString(),
+      sessions: []
+    };
+
+    setProjects((current) => [project, ...current]);
+    setActiveProjectId(project.id);
+  }
+
+  function saveCurrentSessionToProject() {
+    if (!activeSession) return;
+
+    setProjects((current) => persistSessionToProject(current, activeProjectId, activeSession));
+    const targetProject = activeProject || { id: activeProjectId || 'workspace-default', name: projectName, description: projectDescription, createdAt: new Date().toISOString(), sessions: [] };
+    setProjectName(targetProject.name);
+    setProjectDescription(targetProject.description);
+  }
 
   async function generateSession() {
     const trimmedPrompt = prompt.trim();
@@ -232,27 +383,23 @@ export default function App() {
       }
 
       const cards = Array.isArray(data.cards) && data.cards.length > 0 ? data.cards : buildLocalCards(trimmedPrompt, mode);
-      const title = data.title || titleFromPrompt(trimmedPrompt);
-      const summary = data.summary || buildSummary(trimmedPrompt, mode, profile);
-      const session = {
-        id: Date.now() + Math.random(),
-        title,
-        mode,
-        profile,
-        prompt: trimmedPrompt,
-        summary,
-        cards,
-        createdAt: new Date().toISOString()
-      };
+      const session = makeSession(trimmedPrompt, mode, profile, cards, data.title || titleFromPrompt(trimmedPrompt));
 
+      session.summary = data.summary || session.summary;
       setSessions((current) => [session, ...current].slice(0, 12));
       setActiveSession(session);
+      setProjects((current) => persistSessionToProject(current, activeProjectId, session));
+      if (selectedPreset) setSelectedPreset('');
     } catch (err) {
       const fallbackCards = buildLocalCards(trimmedPrompt, mode);
       const fallbackSession = makeSession(trimmedPrompt, mode, profile, fallbackCards);
+
       setSessions((current) => [fallbackSession, ...current].slice(0, 12));
       setActiveSession(fallbackSession);
-      setError(err instanceof Error ? err.message : 'AI generation failed. A local fallback was used instead.');
+      setProjects((current) => persistSessionToProject(current, activeProjectId, fallbackSession));
+      setError(
+        err instanceof Error ? err.message : 'AI generation failed. A local fallback was used instead.'
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -282,6 +429,52 @@ export default function App() {
           <div>
             <p className="eyebrow">AI workspace</p>
             <h1>MindForge</h1>
+          </div>
+        </div>
+
+        <div className="panel project-panel">
+          <label htmlFor="project-name">Project</label>
+          <input
+            id="project-name"
+            value={projectName}
+            onChange={(event) => setProjectName(event.target.value)}
+            placeholder="Strategy Workspace"
+          />
+
+          <label htmlFor="project-description">Project brief</label>
+          <textarea
+            id="project-description"
+            rows={3}
+            value={projectDescription}
+            onChange={(event) => setProjectDescription(event.target.value)}
+            placeholder="Describe the initiative, goal, or team context."
+          />
+
+          <div className="inline-actions">
+            <button className="secondary small" onClick={createProject}>New project</button>
+            <button className="secondary small" onClick={saveCurrentSessionToProject} disabled={!activeSession}>Save session</button>
+          </div>
+        </div>
+
+        <div className="metrics-panel">
+          <h2>Project snapshot</h2>
+          <div className="metric-grid">
+            <div className="metric-box">
+              <strong>{projectMetrics.totalSessions}</strong>
+              <span>Sessions</span>
+            </div>
+            <div className="metric-box">
+              <strong>{projectMetrics.totalCards}</strong>
+              <span>Cards</span>
+            </div>
+            <div className="metric-box">
+              <strong>{projectMetrics.uniqueModes}</strong>
+              <span>Modes</span>
+            </div>
+            <div className="metric-box">
+              <strong>{projectMetrics.lastUpdated}</strong>
+              <span>Updated</span>
+            </div>
           </div>
         </div>
 
@@ -315,6 +508,23 @@ export default function App() {
             </div>
           </div>
 
+          <label htmlFor="preset">Prompt template</label>
+          <select
+            id="preset"
+            value={selectedPreset}
+            onChange={(event) => {
+              const value = event.target.value;
+              setSelectedPreset(value);
+              const selected = presetPrompts.find((item) => item.label === value);
+              if (selected) setPrompt(selected.value);
+            }}
+          >
+            <option value="">Custom prompt</option>
+            {presetPrompts.map((preset) => (
+              <option key={preset.label} value={preset.label}>{preset.label}</option>
+            ))}
+          </select>
+
           <button className="primary" onClick={generateSession} disabled={isGenerating}>
             {isGenerating ? 'Thinking...' : 'Generate insight map'}
           </button>
@@ -323,15 +533,15 @@ export default function App() {
         </div>
 
         <div className="recent-panel">
-          <h2>Recent sessions</h2>
-          {sessions.length === 0 ? (
-            <p className="empty-state">No sessions yet.</p>
+          <h2>Projects</h2>
+          {projects.length === 0 ? (
+            <p className="empty-state">No projects yet.</p>
           ) : (
             <ul>
-              {sessions.map((session) => (
-                <li key={session.id} onClick={() => setActiveSession(session)}>
-                  <strong>{session.title}</strong>
-                  <span>{MODE_META[session.mode].label}</span>
+              {projects.map((project) => (
+                <li key={project.id} onClick={() => setActiveProjectId(project.id)}>
+                  <strong>{project.name}</strong>
+                  <span>{project.sessions.length} saved sessions</span>
                 </li>
               ))}
             </ul>
@@ -363,8 +573,13 @@ export default function App() {
               </div>
               <p>{activeSession.summary}</p>
               <div className="meta-row">
-                <span>Prompt: {activeSession.prompt}</span>
+                <span>{activeSession.prompt}</span>
                 <span>{new Date(activeSession.createdAt).toLocaleDateString()}</span>
+              </div>
+              <div className="tag-row">
+                {activeSession.tags.map((tag) => (
+                  <span key={`${activeSession.id}-${tag}`} className="tag-chip">#{tag}</span>
+                ))}
               </div>
             </section>
 
